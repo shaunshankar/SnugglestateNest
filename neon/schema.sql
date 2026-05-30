@@ -11,12 +11,12 @@ CREATE TABLE households (
   id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name        TEXT NOT NULL,
   invite_code TEXT UNIQUE NOT NULL,
-  owner_id    TEXT REFERENCES neon_auth.users_sync(id) ON DELETE SET NULL,
+  owner_id    TEXT REFERENCES neon_auth."user"(id) ON DELETE SET NULL,
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE TABLE profiles (
-  id           TEXT PRIMARY KEY REFERENCES neon_auth.users_sync(id) ON DELETE CASCADE,
+  id           TEXT PRIMARY KEY REFERENCES neon_auth."user"(id) ON DELETE CASCADE,
   household_id UUID REFERENCES households(id) ON DELETE SET NULL,
   full_name    TEXT,
   email        TEXT,
@@ -35,7 +35,7 @@ CREATE TABLE budgets (
 CREATE TABLE transactions (
   id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   household_id UUID REFERENCES households(id) ON DELETE CASCADE NOT NULL,
-  user_id      TEXT REFERENCES neon_auth.users_sync(id) ON DELETE SET NULL,
+  user_id      TEXT REFERENCES neon_auth."user"(id) ON DELETE SET NULL,
   amount       NUMERIC(10,2) NOT NULL CHECK (amount >= 0),
   category     TEXT NOT NULL,
   date         DATE NOT NULL,
@@ -110,7 +110,7 @@ END;
 $$;
 
 CREATE TRIGGER on_neon_auth_user_created
-  AFTER INSERT ON neon_auth.users_sync
+  AFTER INSERT ON neon_auth."user"
   FOR EACH ROW EXECUTE FUNCTION sync_neon_auth_user();
 
 -- ─────────────────────────────────────────────────────────────
