@@ -19,7 +19,19 @@ export function AuthProvider({ children }) {
     }
     setProfileLoading(true)
     dbFetch('SELECT * FROM profiles WHERE id = $1', [user.id])
-      .then(rows => setProfile(rows[0] ?? null))
+      .then(async rows => {
+        if (rows[0]) {
+          setProfile(rows[0])
+        } else {
+          // Profile doesn't exist yet — create it (handles new sign-ups)
+          await dbFetch(
+            'INSERT INTO profiles (id, email, full_name) VALUES ($1, $2, $3) ON CONFLICT (id) DO NOTHING',
+            [user.id, user.email, user.name ?? '']
+          )
+          const fresh = await dbFetch('SELECT * FROM profiles WHERE id = $1', [user.id])
+          setProfile(fresh[0] ?? null)
+        }
+      })
       .finally(() => setProfileLoading(false))
   }, [user?.id, isPending])
 
@@ -28,13 +40,6 @@ export function AuthProvider({ children }) {
   async function signUp(email, password, fullName) {
     const result = await authClient.signUp.email({ email, password, name: fullName })
     if (result?.error) throw result.error
-    const newUser = result?.data?.user
-    if (newUser?.id) {
-      await dbFetch(
-        'INSERT INTO profiles (id, email, full_name) VALUES ($1, $2, $3) ON CONFLICT (id) DO NOTHING',
-        [newUser.id, email, fullName]
-      )
-    }
     return result?.data
   }
 
