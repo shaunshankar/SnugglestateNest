@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, useCallback } from 'react'
-import { dbFetch } from '../lib/db'
+import { client } from '../lib/auth'
 import { useAuth } from './useAuth'
 
 const HouseholdContext = createContext(null)
@@ -19,12 +19,12 @@ export function HouseholdProvider({ children }) {
     }
     setLoading(true)
     try {
-      const [hhRows, memRows] = await Promise.all([
-        dbFetch('SELECT * FROM households WHERE id = $1', [profile.household_id]),
-        dbFetch('SELECT * FROM profiles WHERE household_id = $1', [profile.household_id]),
+      const [{ data: hh }, { data: mems }] = await Promise.all([
+        client.from('households').select('*').eq('id', profile.household_id).single(),
+        client.from('profiles').select('*').eq('household_id', profile.household_id),
       ])
-      setHousehold(hhRows[0] ?? null)
-      setMembers(memRows)
+      setHousehold(hh ?? null)
+      setMembers(mems || [])
     } finally {
       setLoading(false)
     }
@@ -37,15 +37,17 @@ export function HouseholdProvider({ children }) {
   const isOwner = household && user && household.owner_id === user.id
 
   async function createHousehold(name) {
-    const rows = await dbFetch('SELECT create_household($1)', [name])
+    const { data, error } = await client.rpc('create_household', { household_name: name })
+    if (error) throw error
     await fetchHousehold()
-    return rows[0]
+    return data
   }
 
   async function joinHousehold(inviteCode) {
-    const rows = await dbFetch('SELECT join_household_by_invite($1)', [inviteCode])
+    const { data, error } = await client.rpc('join_household_by_invite', { invite_code_input: inviteCode })
+    if (error) throw error
     await fetchHousehold()
-    return rows[0]
+    return data
   }
 
   return (

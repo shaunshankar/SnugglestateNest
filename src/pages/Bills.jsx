@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Plus, FileText, Check, ChevronDown, ChevronUp, ToggleLeft, ToggleRight } from 'lucide-react'
-import { dbFetch } from '../lib/db'
+import { client } from '../lib/auth'
 import { useAuth } from '../hooks/useAuth'
 import Layout from '../components/Layout'
 import CategoryBadge from '../components/CategoryBadge'
@@ -22,47 +22,35 @@ export default function Bills() {
 
   async function load() {
     if (!hid) return
-    const rows = await dbFetch(
-      'SELECT * FROM bills WHERE household_id = $1 ORDER BY due_day',
-      [hid]
-    )
-    setBills(rows)
+    const { data } = await client.from('bills').select('*').eq('household_id', hid).order('due_day')
+    setBills(data || [])
     setLoading(false)
   }
 
   useEffect(() => { load() }, [hid])
 
   async function markPaid(bill) {
-    try {
-      await dbFetch(
-        'INSERT INTO bill_payments (bill_id, household_id, paid_date, amount) VALUES ($1, $2, $3, $4)',
-        [bill.id, hid, getTodayString(), bill.amount]
-      )
-      toast.success(`${bill.name} marked as paid!`)
-    } catch {
-      toast.error('Failed to mark paid')
-    }
+    const { error } = await client.from('bill_payments').insert({
+      bill_id: bill.id,
+      household_id: hid,
+      paid_date: getTodayString(),
+      amount: bill.amount,
+    })
+    if (error) { toast.error('Failed to mark paid'); return }
+    toast.success(`${bill.name} marked as paid!`)
   }
 
   async function toggleActive(bill) {
-    try {
-      await dbFetch(
-        'UPDATE bills SET is_active = $1 WHERE id = $2',
-        [!bill.is_active, bill.id]
-      )
-      toast.success(bill.is_active ? 'Bill paused' : 'Bill reactivated')
-      load()
-    } catch {
-      toast.error('Failed to update')
-    }
+    const { error } = await client.from('bills').update({ is_active: !bill.is_active }).eq('id', bill.id)
+    if (error) { toast.error('Failed to update'); return }
+    toast.success(bill.is_active ? 'Bill paused' : 'Bill reactivated')
+    load()
   }
 
   const activeBills = bills.filter(b => b.is_active)
   const inactiveBills = bills.filter(b => !b.is_active)
-
   const upcoming = activeBills.filter(b => getDaysUntil(b.due_day) <= 30).sort((a, b) => getDaysUntil(a.due_day) - getDaysUntil(b.due_day))
   const rest = activeBills.filter(b => getDaysUntil(b.due_day) > 30)
-
   const monthlyTotal = activeBills.reduce((s, b) => {
     const factor = b.frequency === 'quarterly' ? 1/3 : b.frequency === 'yearly' ? 1/12 : 1
     return s + Number(b.amount) * factor
@@ -130,7 +118,6 @@ export default function Bills() {
 function BillCard({ bill, onMarkPaid, onToggleActive }) {
   const daysUntil = getDaysUntil(bill.due_day)
   const isUrgent = daysUntil <= 3 && bill.is_active
-
   return (
     <div className={`flex items-center gap-4 p-3 rounded-xl border ${isUrgent ? 'border-red-100 bg-red-50' : 'border-stone-100 bg-stone-50'}`}>
       <div className="flex-1 min-w-0">
@@ -145,9 +132,7 @@ function BillCard({ bill, onMarkPaid, onToggleActive }) {
         </p>
       </div>
       <div className="flex items-center gap-2 shrink-0">
-        <span className={`text-sm font-bold ${isUrgent ? 'text-red-600' : 'text-slate-700'}`}>
-          {formatCurrency(bill.amount)}
-        </span>
+        <span className={`text-sm font-bold ${isUrgent ? 'text-red-600' : 'text-slate-700'}`}>{formatCurrency(bill.amount)}</span>
         {bill.is_active && (
           <button onClick={() => onMarkPaid(bill)} title="Mark as paid" className="p-1.5 bg-teal-50 hover:bg-teal-100 text-teal-600 rounded-lg transition-colors">
             <Check size={14} />
@@ -168,18 +153,19 @@ function BillForm({ hid, onSuccess }) {
   async function handleSubmit(e) {
     e.preventDefault()
     setSaving(true)
-    try {
-      await dbFetch(
-        'INSERT INTO bills (household_id, name, amount, due_day, frequency, category, is_active) VALUES ($1, $2, $3, $4, $5, $6, $7)',
-        [hid, form.name, Number(form.amount), Number(form.due_day), form.frequency, form.category, true]
-      )
-      toast.success('Bill added!')
-      onSuccess()
-    } catch {
-      toast.error('Failed to save bill')
-    } finally {
-      setSaving(false)
-    }
+    const { error } = await client.from('bills').insert({
+      household_id: hid,
+      name: form.name,
+      amount: Number(form.amount),
+      due_day: Number(form.due_day),
+      frequency: form.frequency,
+      category: form.category,
+      is_active: true,
+    })
+    setSaving(false)
+    if (error) { toast.error('Failed to save bill'); return }
+    toast.success('Bill added!')
+    onSuccess()
   }
 
   return (
@@ -188,18 +174,15 @@ function BillForm({ hid, onSuccess }) {
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
         <div className="col-span-2 sm:col-span-1">
           <label className="label">Bill name</label>
-          <input type="text" className="input" placeholder="e.g. Netflix" value={form.name}
-            onChange={e => setForm(f => ({ ...f, name: e.target.value }))} required />
+          <input type="text" className="input" placeholder="e.g. Netflix" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} required />
         </div>
         <div>
           <label className="label">Amount ($)</label>
-          <input type="number" min="0" step="0.01" className="input" placeholder="0.00" value={form.amount}
-            onChange={e => setForm(f => ({ ...f, amount: e.target.value }))} required />
+          <input type="number" min="0" step="0.01" className="input" placeholder="0.00" value={form.amount} onChange={e => setForm(f => ({ ...f, amount: e.target.value }))} required />
         </div>
         <div>
           <label className="label">Due day of month</label>
-          <input type="number" min="1" max="31" className="input" value={form.due_day}
-            onChange={e => setForm(f => ({ ...f, due_day: e.target.value }))} required />
+          <input type="number" min="1" max="31" className="input" value={form.due_day} onChange={e => setForm(f => ({ ...f, due_day: e.target.value }))} required />
         </div>
         <div>
           <label className="label">Frequency</label>

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { Plus, Upload, Search, Receipt, Check, X, ChevronLeft, ChevronRight } from 'lucide-react'
 import Papa from 'papaparse'
-import { dbFetch } from '../lib/db'
+import { client } from '../lib/auth'
 import { useAuth } from '../hooks/useAuth'
 import Layout from '../components/Layout'
 import CategoryBadge from '../components/CategoryBadge'
@@ -35,46 +35,20 @@ export default function Transactions() {
   const load = useCallback(async () => {
     if (!hid) return
     setLoading(true)
+    let q = client.from('transactions').select('*', { count: 'exact' })
+      .eq('household_id', hid)
+      .order('date', { ascending: false })
+      .order('created_at', { ascending: false })
+      .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1)
 
-    const params = [hid]
-    let where = 'household_id = $1'
-    let idx = 2
+    if (search) q = q.or(`merchant.ilike.%${search}%,notes.ilike.%${search}%`)
+    if (filterCategory) q = q.eq('category', filterCategory)
+    if (filterFrom) q = q.gte('date', filterFrom)
+    if (filterTo) q = q.lte('date', filterTo)
 
-    if (search) {
-      where += ` AND (merchant ILIKE $${idx} OR notes ILIKE $${idx})`
-      params.push(`%${search}%`)
-      idx++
-    }
-    if (filterCategory) {
-      where += ` AND category = $${idx}`
-      params.push(filterCategory)
-      idx++
-    }
-    if (filterFrom) {
-      where += ` AND date >= $${idx}`
-      params.push(filterFrom)
-      idx++
-    }
-    if (filterTo) {
-      where += ` AND date <= $${idx}`
-      params.push(filterTo)
-      idx++
-    }
-
-    const offset = page * PAGE_SIZE
-    params.push(PAGE_SIZE, offset)
-
-    const rows = await dbFetch(
-      `SELECT *, COUNT(*) OVER() AS total_count
-       FROM transactions
-       WHERE ${where}
-       ORDER BY date DESC, created_at DESC
-       LIMIT $${idx} OFFSET $${idx + 1}`,
-      params
-    )
-
-    setTransactions(rows)
-    setTotalCount(rows.length > 0 ? Number(rows[0].total_count) : 0)
+    const { data, count } = await q
+    setTransactions(data || [])
+    setTotalCount(count || 0)
     setLoading(false)
   }, [hid, page, search, filterCategory, filterFrom, filterTo])
 
@@ -118,28 +92,16 @@ export default function Transactions() {
       }
     }).filter(r => r.amount > 0)
 
-    try {
-      for (const row of rows) {
-        await dbFetch(
-          'INSERT INTO transactions (household_id, user_id, amount, category, date, merchant, notes) VALUES ($1, $2, $3, $4, $5, $6, $7)',
-          [row.household_id, row.user_id, row.amount, row.category, row.date, row.merchant, row.notes]
-        )
-      }
-      toast.success(`${rows.length} transactions imported`)
-      setCsvRows(null)
-      load()
-    } catch {
-      toast.error('Import failed')
-    }
+    const { error } = await client.from('transactions').insert(rows)
+    if (error) { toast.error('Import failed'); return }
+    toast.success(`${rows.length} transactions imported`)
+    setCsvRows(null)
+    load()
   }
 
   async function deleteTransaction(id) {
-    try {
-      await dbFetch('DELETE FROM transactions WHERE id = $1', [id])
-      load()
-    } catch {
-      toast.error('Failed to delete transaction')
-    }
+    const { error } = await client.from('transactions').delete().eq('id', id)
+    if (!error) load()
   }
 
   const totalPages = Math.ceil(totalCount / PAGE_SIZE)
@@ -152,8 +114,7 @@ export default function Transactions() {
           <div className="flex gap-2">
             <input ref={fileInputRef} type="file" accept=".csv" className="hidden" onChange={handleFileUpload} />
             <button onClick={() => fileInputRef.current.click()} className="btn-secondary flex items-center gap-2" disabled={csvLoading}>
-              <Upload size={16} />
-              {csvLoading ? 'Processing…' : 'Import CSV'}
+              <Upload size={16} />{csvLoading ? 'Processing…' : 'Import CSV'}
             </button>
             <button onClick={() => setShowForm(!showForm)} className="btn-primary flex items-center gap-2">
               <Plus size={16} /> Add
@@ -164,39 +125,30 @@ export default function Transactions() {
         {showForm && <AddTransactionForm hid={hid} profileId={profile?.id} onSuccess={() => { setShowForm(false); load() }} />}
 
         {csvRows && (
-          <CsvReviewPanel rows={csvRows} onUpdateRow={(id, field, val) => {
-            setCsvRows(prev => prev.map(r => r._id === id ? { ...r, [field]: val } : r))
-          }} onConfirm={confirmCsvImport} onCancel={() => setCsvRows(null)} />
+          <CsvReviewPanel rows={csvRows}
+            onUpdateRow={(id, field, val) => setCsvRows(prev => prev.map(r => r._id === id ? { ...r, [field]: val } : r))}
+            onConfirm={confirmCsvImport} onCancel={() => setCsvRows(null)} />
         )}
 
-        {/* Filters */}
         <div className="card">
           <div className="flex flex-wrap gap-3">
             <div className="relative flex-1 min-w-[200px]">
               <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-              <input
-                type="text"
-                className="input pl-9"
-                placeholder="Search merchant or notes…"
-                value={search}
-                onChange={e => { setSearch(e.target.value); setPage(0) }}
-              />
+              <input type="text" className="input pl-9" placeholder="Search merchant or notes…" value={search}
+                onChange={e => { setSearch(e.target.value); setPage(0) }} />
             </div>
             <select className="input w-auto min-w-[140px]" value={filterCategory} onChange={e => { setFilterCategory(e.target.value); setPage(0) }}>
               <option value="">All categories</option>
               {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
             </select>
-            <input type="date" className="input w-auto" value={filterFrom} onChange={e => { setFilterFrom(e.target.value); setPage(0) }} placeholder="From" />
-            <input type="date" className="input w-auto" value={filterTo} onChange={e => { setFilterTo(e.target.value); setPage(0) }} placeholder="To" />
+            <input type="date" className="input w-auto" value={filterFrom} onChange={e => { setFilterFrom(e.target.value); setPage(0) }} />
+            <input type="date" className="input w-auto" value={filterTo} onChange={e => { setFilterTo(e.target.value); setPage(0) }} />
             {(search || filterCategory || filterFrom || filterTo) && (
-              <button className="btn-secondary text-sm" onClick={() => { setSearch(''); setFilterCategory(''); setFilterFrom(''); setFilterTo(''); setPage(0) }}>
-                Clear
-              </button>
+              <button className="btn-secondary text-sm" onClick={() => { setSearch(''); setFilterCategory(''); setFilterFrom(''); setFilterTo(''); setPage(0) }}>Clear</button>
             )}
           </div>
         </div>
 
-        {/* List */}
         {loading ? <PageLoader /> : transactions.length === 0 ? (
           <div className="card">
             <EmptyState icon={Receipt} title="No transactions" description="Add a transaction or import a CSV bank statement." />
@@ -213,13 +165,9 @@ export default function Transactions() {
           <div className="flex items-center justify-between">
             <p className="text-sm text-slate-500">{totalCount} transactions</p>
             <div className="flex gap-2">
-              <button className="btn-secondary p-2" onClick={() => setPage(p => p - 1)} disabled={page === 0}>
-                <ChevronLeft size={16} />
-              </button>
+              <button className="btn-secondary p-2" onClick={() => setPage(p => p - 1)} disabled={page === 0}><ChevronLeft size={16} /></button>
               <span className="text-sm text-slate-600 flex items-center px-2">{page + 1} / {totalPages}</span>
-              <button className="btn-secondary p-2" onClick={() => setPage(p => p + 1)} disabled={page >= totalPages - 1}>
-                <ChevronRight size={16} />
-              </button>
+              <button className="btn-secondary p-2" onClick={() => setPage(p => p + 1)} disabled={page >= totalPages - 1}><ChevronRight size={16} /></button>
             </div>
           </div>
         )}
@@ -241,9 +189,7 @@ function TransactionRow({ tx, onDelete }) {
       </div>
       <div className="flex items-center gap-3 shrink-0">
         <span className="text-sm font-semibold text-slate-800">{formatCurrency(tx.amount)}</span>
-        <button onClick={onDelete} className="opacity-0 group-hover:opacity-100 p-1 text-slate-300 hover:text-red-400 transition-all">
-          <X size={14} />
-        </button>
+        <button onClick={onDelete} className="opacity-0 group-hover:opacity-100 p-1 text-slate-300 hover:text-red-400 transition-all"><X size={14} /></button>
       </div>
     </div>
   )
@@ -271,18 +217,19 @@ function AddTransactionForm({ hid, profileId, onSuccess }) {
   async function handleSubmit(e) {
     e.preventDefault()
     setSaving(true)
-    try {
-      await dbFetch(
-        'INSERT INTO transactions (household_id, user_id, amount, category, date, merchant, notes) VALUES ($1, $2, $3, $4, $5, $6, $7)',
-        [hid, profileId, Number(form.amount), form.category, form.date, form.merchant, form.notes]
-      )
-      toast.success('Transaction added')
-      onSuccess()
-    } catch {
-      toast.error('Failed to save transaction')
-    } finally {
-      setSaving(false)
-    }
+    const { error } = await client.from('transactions').insert({
+      household_id: hid,
+      user_id: profileId,
+      amount: Number(form.amount),
+      category: form.category,
+      date: form.date,
+      merchant: form.merchant,
+      notes: form.notes,
+    })
+    setSaving(false)
+    if (error) { toast.error('Failed to save transaction'); return }
+    toast.success('Transaction added')
+    onSuccess()
   }
 
   return (
@@ -291,8 +238,7 @@ function AddTransactionForm({ hid, profileId, onSuccess }) {
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
         <div>
           <label className="label">Amount ($)</label>
-          <input type="number" min="0" step="0.01" className="input" placeholder="0.00" value={form.amount}
-            onChange={e => setForm(f => ({ ...f, amount: e.target.value }))} required />
+          <input type="number" min="0" step="0.01" className="input" placeholder="0.00" value={form.amount} onChange={e => setForm(f => ({ ...f, amount: e.target.value }))} required />
         </div>
         <div>
           <label className="label">Date</label>
@@ -300,8 +246,7 @@ function AddTransactionForm({ hid, profileId, onSuccess }) {
         </div>
         <div>
           <label className="label">Merchant</label>
-          <input type="text" className="input" placeholder="e.g. Whole Foods" value={form.merchant}
-            onChange={e => handleMerchantChange(e.target.value)} />
+          <input type="text" className="input" placeholder="e.g. Whole Foods" value={form.merchant} onChange={e => handleMerchantChange(e.target.value)} />
         </div>
         <div className="col-span-2 sm:col-span-1">
           <label className="label">Category</label>
@@ -311,10 +256,8 @@ function AddTransactionForm({ hid, profileId, onSuccess }) {
               {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
             </select>
             {suggestion && form.category !== suggestion && (
-              <button type="button"
-                onClick={() => { setForm(f => ({ ...f, category: suggestion })); setSuggestion(null) }}
-                className="inline-flex items-center gap-1 text-xs bg-teal-50 text-teal-700 px-2 py-1 rounded-full hover:bg-teal-100 transition-colors"
-              >
+              <button type="button" onClick={() => { setForm(f => ({ ...f, category: suggestion })); setSuggestion(null) }}
+                className="inline-flex items-center gap-1 text-xs bg-teal-50 text-teal-700 px-2 py-1 rounded-full hover:bg-teal-100 transition-colors">
                 <Check size={10} /> AI suggests: {suggestion}
               </button>
             )}
@@ -322,8 +265,7 @@ function AddTransactionForm({ hid, profileId, onSuccess }) {
         </div>
         <div className="col-span-2 sm:col-span-2">
           <label className="label">Notes (optional)</label>
-          <input type="text" className="input" placeholder="Any notes…" value={form.notes}
-            onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
+          <input type="text" className="input" placeholder="Any notes…" value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
         </div>
       </div>
       <div className="flex gap-2 mt-4">
@@ -365,8 +307,7 @@ function CsvReviewPanel({ rows, onUpdateRow, onConfirm, onCancel }) {
                   <td className="py-2 pr-4 text-slate-700">{amount}</td>
                   <td className="py-2 pr-4 text-slate-500">{date}</td>
                   <td className="py-2">
-                    <select className="input py-1 text-xs" value={row.category || 'Other'}
-                      onChange={e => onUpdateRow(row._id, 'category', e.target.value)}>
+                    <select className="input py-1 text-xs" value={row.category || 'Other'} onChange={e => onUpdateRow(row._id, 'category', e.target.value)}>
                       {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
                     </select>
                   </td>

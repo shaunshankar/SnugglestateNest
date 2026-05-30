@@ -1,6 +1,5 @@
 import { createContext, useContext, useEffect, useState } from 'react'
-import { authClient } from '../lib/auth'
-import { dbFetch } from '../lib/db'
+import { authClient, client } from '../lib/auth'
 
 const AuthContext = createContext(null)
 
@@ -18,18 +17,18 @@ export function AuthProvider({ children }) {
       return
     }
     setProfileLoading(true)
-    dbFetch('SELECT * FROM profiles WHERE id = $1', [user.id])
-      .then(async rows => {
-        if (rows[0]) {
-          setProfile(rows[0])
+    client.from('profiles').select('*').eq('id', user.id).single()
+      .then(async ({ data }) => {
+        if (data) {
+          setProfile(data)
         } else {
-          // Profile doesn't exist yet — create it (handles new sign-ups)
-          await dbFetch(
-            'INSERT INTO profiles (id, email, full_name) VALUES ($1, $2, $3) ON CONFLICT (id) DO NOTHING',
-            [user.id, user.email, user.name ?? '']
-          )
-          const fresh = await dbFetch('SELECT * FROM profiles WHERE id = $1', [user.id])
-          setProfile(fresh[0] ?? null)
+          await client.from('profiles').insert({
+            id: user.id,
+            email: user.email,
+            full_name: user.name ?? '',
+          })
+          const { data: fresh } = await client.from('profiles').select('*').eq('id', user.id).single()
+          setProfile(fresh ?? null)
         }
       })
       .finally(() => setProfileLoading(false))
@@ -56,8 +55,8 @@ export function AuthProvider({ children }) {
 
   async function refreshProfile() {
     if (user) {
-      const rows = await dbFetch('SELECT * FROM profiles WHERE id = $1', [user.id])
-      setProfile(rows[0] ?? null)
+      const { data } = await client.from('profiles').select('*').eq('id', user.id).single()
+      setProfile(data ?? null)
     }
   }
 
