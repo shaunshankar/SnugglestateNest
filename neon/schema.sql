@@ -11,12 +11,12 @@ CREATE TABLE households (
   id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name        TEXT NOT NULL,
   invite_code TEXT UNIQUE NOT NULL,
-  owner_id    TEXT REFERENCES neon_auth."user"(id) ON DELETE SET NULL,
+  owner_id    UUID REFERENCES neon_auth."user"(id) ON DELETE SET NULL,
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE TABLE profiles (
-  id           TEXT PRIMARY KEY REFERENCES neon_auth."user"(id) ON DELETE CASCADE,
+  id           UUID PRIMARY KEY REFERENCES neon_auth."user"(id) ON DELETE CASCADE,
   household_id UUID REFERENCES households(id) ON DELETE SET NULL,
   full_name    TEXT,
   email        TEXT,
@@ -35,7 +35,7 @@ CREATE TABLE budgets (
 CREATE TABLE transactions (
   id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   household_id UUID REFERENCES households(id) ON DELETE CASCADE NOT NULL,
-  user_id      TEXT REFERENCES neon_auth."user"(id) ON DELETE SET NULL,
+  user_id      UUID REFERENCES neon_auth."user"(id) ON DELETE SET NULL,
   amount       NUMERIC(10,2) NOT NULL CHECK (amount >= 0),
   category     TEXT NOT NULL,
   date         DATE NOT NULL,
@@ -103,7 +103,7 @@ CREATE INDEX idx_profiles_household ON profiles(household_id);
 CREATE OR REPLACE FUNCTION sync_neon_auth_user() RETURNS TRIGGER LANGUAGE plpgsql AS $$
 BEGIN
   INSERT INTO public.profiles (id, email, full_name)
-  VALUES (NEW.id, NEW.email, NEW.name)
+  VALUES (NEW.id::uuid, NEW.email, NEW.name)
   ON CONFLICT (id) DO NOTHING;
   RETURN NEW;
 END;
@@ -125,7 +125,7 @@ DECLARE
   attempt       INT := 0;
   current_user_id TEXT;
 BEGIN
-  current_user_id := current_setting('neon_auth.user_id', true);
+  current_user_id := (current_setting('neon_auth.user_id', true))::uuid;
 
   LOOP
     invite := upper(substring(encode(gen_random_bytes(4), 'hex'), 1, 6));
@@ -150,7 +150,7 @@ DECLARE
   hh              households%ROWTYPE;
   current_user_id TEXT;
 BEGIN
-  current_user_id := current_setting('neon_auth.user_id', true);
+  current_user_id := (current_setting('neon_auth.user_id', true))::uuid;
 
   SELECT * INTO hh FROM households WHERE invite_code = upper(trim(invite_code_input));
 
@@ -185,65 +185,65 @@ ALTER TABLE savings_contributions ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "household_select" ON households FOR SELECT
   USING (
-    id IN (SELECT household_id FROM profiles WHERE id = (current_setting('neon_auth.user_id', true)))
-    OR owner_id = (current_setting('neon_auth.user_id', true))
+    id IN (SELECT household_id FROM profiles WHERE id = ((current_setting('neon_auth.user_id', true))::uuid))
+    OR owner_id = ((current_setting('neon_auth.user_id', true))::uuid)
   );
 
 CREATE POLICY "household_insert" ON households FOR INSERT
-  WITH CHECK (owner_id = (current_setting('neon_auth.user_id', true)));
+  WITH CHECK (owner_id = ((current_setting('neon_auth.user_id', true))::uuid));
 
 CREATE POLICY "household_update" ON households FOR UPDATE
-  USING (owner_id = (current_setting('neon_auth.user_id', true)));
+  USING (owner_id = ((current_setting('neon_auth.user_id', true))::uuid));
 
 -- ── profiles ────────────────────────────────────────────────
 
 CREATE POLICY "profile_select" ON profiles FOR SELECT
   USING (
-    id = (current_setting('neon_auth.user_id', true))
+    id = ((current_setting('neon_auth.user_id', true))::uuid)
     OR household_id IN (
       SELECT household_id FROM profiles
-      WHERE id = (current_setting('neon_auth.user_id', true)) AND household_id IS NOT NULL
+      WHERE id = ((current_setting('neon_auth.user_id', true))::uuid) AND household_id IS NOT NULL
     )
   );
 
 CREATE POLICY "profile_insert" ON profiles FOR INSERT
-  WITH CHECK (id = (current_setting('neon_auth.user_id', true)));
+  WITH CHECK (id = ((current_setting('neon_auth.user_id', true))::uuid));
 
 CREATE POLICY "profile_update" ON profiles FOR UPDATE
-  USING (id = (current_setting('neon_auth.user_id', true)));
+  USING (id = ((current_setting('neon_auth.user_id', true))::uuid));
 
 -- ── budgets ─────────────────────────────────────────────────
 
 CREATE POLICY "budgets_all" ON budgets FOR ALL
-  USING (household_id IN (SELECT household_id FROM profiles WHERE id = (current_setting('neon_auth.user_id', true))))
-  WITH CHECK (household_id IN (SELECT household_id FROM profiles WHERE id = (current_setting('neon_auth.user_id', true))));
+  USING (household_id IN (SELECT household_id FROM profiles WHERE id = ((current_setting('neon_auth.user_id', true))::uuid)))
+  WITH CHECK (household_id IN (SELECT household_id FROM profiles WHERE id = ((current_setting('neon_auth.user_id', true))::uuid)));
 
 -- ── transactions ────────────────────────────────────────────
 
 CREATE POLICY "transactions_all" ON transactions FOR ALL
-  USING (household_id IN (SELECT household_id FROM profiles WHERE id = (current_setting('neon_auth.user_id', true))))
-  WITH CHECK (household_id IN (SELECT household_id FROM profiles WHERE id = (current_setting('neon_auth.user_id', true))));
+  USING (household_id IN (SELECT household_id FROM profiles WHERE id = ((current_setting('neon_auth.user_id', true))::uuid)))
+  WITH CHECK (household_id IN (SELECT household_id FROM profiles WHERE id = ((current_setting('neon_auth.user_id', true))::uuid)));
 
 -- ── bills ───────────────────────────────────────────────────
 
 CREATE POLICY "bills_all" ON bills FOR ALL
-  USING (household_id IN (SELECT household_id FROM profiles WHERE id = (current_setting('neon_auth.user_id', true))))
-  WITH CHECK (household_id IN (SELECT household_id FROM profiles WHERE id = (current_setting('neon_auth.user_id', true))));
+  USING (household_id IN (SELECT household_id FROM profiles WHERE id = ((current_setting('neon_auth.user_id', true))::uuid)))
+  WITH CHECK (household_id IN (SELECT household_id FROM profiles WHERE id = ((current_setting('neon_auth.user_id', true))::uuid)));
 
 -- ── bill_payments ───────────────────────────────────────────
 
 CREATE POLICY "bill_payments_all" ON bill_payments FOR ALL
-  USING (household_id IN (SELECT household_id FROM profiles WHERE id = (current_setting('neon_auth.user_id', true))))
-  WITH CHECK (household_id IN (SELECT household_id FROM profiles WHERE id = (current_setting('neon_auth.user_id', true))));
+  USING (household_id IN (SELECT household_id FROM profiles WHERE id = ((current_setting('neon_auth.user_id', true))::uuid)))
+  WITH CHECK (household_id IN (SELECT household_id FROM profiles WHERE id = ((current_setting('neon_auth.user_id', true))::uuid)));
 
 -- ── savings_goals ───────────────────────────────────────────
 
 CREATE POLICY "savings_goals_all" ON savings_goals FOR ALL
-  USING (household_id IN (SELECT household_id FROM profiles WHERE id = (current_setting('neon_auth.user_id', true))))
-  WITH CHECK (household_id IN (SELECT household_id FROM profiles WHERE id = (current_setting('neon_auth.user_id', true))));
+  USING (household_id IN (SELECT household_id FROM profiles WHERE id = ((current_setting('neon_auth.user_id', true))::uuid)))
+  WITH CHECK (household_id IN (SELECT household_id FROM profiles WHERE id = ((current_setting('neon_auth.user_id', true))::uuid)));
 
 -- ── savings_contributions ───────────────────────────────────
 
 CREATE POLICY "savings_contributions_all" ON savings_contributions FOR ALL
-  USING (household_id IN (SELECT household_id FROM profiles WHERE id = (current_setting('neon_auth.user_id', true))))
-  WITH CHECK (household_id IN (SELECT household_id FROM profiles WHERE id = (current_setting('neon_auth.user_id', true))));
+  USING (household_id IN (SELECT household_id FROM profiles WHERE id = ((current_setting('neon_auth.user_id', true))::uuid)))
+  WITH CHECK (household_id IN (SELECT household_id FROM profiles WHERE id = ((current_setting('neon_auth.user_id', true))::uuid)));
