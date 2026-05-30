@@ -21,10 +21,18 @@ export default function Signup() {
     setLoading(true)
     try {
       await signUp(email, password, fullName)
+      sessionStorage.setItem('pendingVerifyEmail', email)
       toast.success('Account created! Check your email for a verification code.')
       navigate('/verify-email', { state: { email } })
     } catch (err) {
-      toast.error(err.message || 'Failed to create account')
+      const msg = err.message || ''
+      // Some auth providers return a verification-required error on sign-up
+      if (msg.toLowerCase().includes('verif')) {
+        sessionStorage.setItem('pendingVerifyEmail', email)
+        navigate('/verify-email', { state: { email } })
+      } else {
+        toast.error(msg || 'Failed to create account')
+      }
     } finally {
       setLoading(false)
     }

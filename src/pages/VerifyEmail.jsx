@@ -7,7 +7,7 @@ import toast from 'react-hot-toast'
 export default function VerifyEmail() {
   const { state } = useLocation()
   const navigate = useNavigate()
-  const email = state?.email || ''
+  const email = state?.email || sessionStorage.getItem('pendingVerifyEmail') || ''
   const [code, setCode] = useState('')
   const [loading, setLoading] = useState(false)
   const [resending, setResending] = useState(false)
@@ -19,6 +19,7 @@ export default function VerifyEmail() {
     try {
       const result = await authClient.emailOtp.verifyEmail({ email, otp: code.trim() })
       if (result?.error) throw result.error
+      sessionStorage.removeItem('pendingVerifyEmail')
       toast.success('Email verified!')
       navigate('/household-setup')
     } catch (err) {
