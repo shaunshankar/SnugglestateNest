@@ -6,6 +6,7 @@ import ProtectedRoute, { HouseholdRoute } from './components/ProtectedRoute'
 
 import Login from './pages/Login'
 import Signup from './pages/Signup'
+import VerifyEmail from './pages/VerifyEmail'
 import HouseholdSetup from './pages/HouseholdSetup'
 import Dashboard from './pages/Dashboard'
 import Budgets from './pages/Budgets'
@@ -30,6 +31,7 @@ export default function App() {
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/signup" element={<Signup />} />
+            <Route path="/verify-email" element={<VerifyEmail />} />
 
             <Route element={<ProtectedRoute />}>
               <Route path="/household-setup" element={<HouseholdSetup />} />

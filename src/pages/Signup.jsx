@@ -21,8 +21,8 @@ export default function Signup() {
     setLoading(true)
     try {
       await signUp(email, password, fullName)
-      toast.success('Account created! Set up your household next.')
-      navigate('/household-setup')
+      toast.success('Account created! Check your email for a verification code.')
+      navigate('/verify-email', { state: { email } })
     } catch (err) {
       toast.error(err.message || 'Failed to create account')
     } finally {
