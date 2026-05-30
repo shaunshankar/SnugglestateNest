@@ -28,6 +28,13 @@ export function AuthProvider({ children }) {
   async function signUp(email, password, fullName) {
     const result = await authClient.signUp.email({ email, password, name: fullName })
     if (result?.error) throw result.error
+    const newUser = result?.data?.user
+    if (newUser?.id) {
+      await dbFetch(
+        'INSERT INTO profiles (id, email, full_name) VALUES ($1, $2, $3) ON CONFLICT (id) DO NOTHING',
+        [newUser.id, email, fullName]
+      )
+    }
     return result?.data
   }
 

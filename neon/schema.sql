@@ -96,22 +96,8 @@ CREATE INDEX idx_bills_household_active ON bills(household_id, is_active);
 CREATE INDEX idx_savings_goals_household ON savings_goals(household_id);
 CREATE INDEX idx_profiles_household ON profiles(household_id);
 
--- ─────────────────────────────────────────────────────────────
--- NEON AUTH USER SYNC TRIGGER
--- ─────────────────────────────────────────────────────────────
-
-CREATE OR REPLACE FUNCTION sync_neon_auth_user() RETURNS TRIGGER LANGUAGE plpgsql AS $$
-BEGIN
-  INSERT INTO public.profiles (id, email, full_name)
-  VALUES (NEW.id::uuid, NEW.email, NEW.name)
-  ON CONFLICT (id) DO NOTHING;
-  RETURN NEW;
-END;
-$$;
-
-CREATE TRIGGER on_neon_auth_user_created
-  AFTER INSERT ON neon_auth."user"
-  FOR EACH ROW EXECUTE FUNCTION sync_neon_auth_user();
+-- NOTE: Profile rows are created by the app in useAuth.jsx after sign-up.
+-- Triggers on neon_auth."user" are not used as they can block user creation.
 
 -- ─────────────────────────────────────────────────────────────
 -- HELPER FUNCTIONS
