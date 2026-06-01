@@ -55,8 +55,10 @@ export function AuthProvider({ children }) {
 
   async function refreshProfile() {
     if (user) {
+      setProfileLoading(true)
       const { data } = await client.from('profiles').select('*').eq('id', user.id).single()
       setProfile(data ?? null)
+      setProfileLoading(false)
     }
   }
 

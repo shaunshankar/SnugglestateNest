@@ -109,12 +109,12 @@ DECLARE
   new_household households%ROWTYPE;
   invite        TEXT;
   attempt       INT := 0;
-  current_user_id TEXT;
+  current_user_id UUID;
 BEGIN
   current_user_id := (current_setting('neon_auth.user_id', true))::uuid;
 
   LOOP
-    invite := upper(substring(encode(gen_random_bytes(4), 'hex'), 1, 6));
+    invite := upper(substring(replace(gen_random_uuid()::text, '-', ''), 1, 6));
     EXIT WHEN NOT EXISTS (SELECT 1 FROM households WHERE invite_code = invite);
     attempt := attempt + 1;
     IF attempt > 10 THEN RAISE EXCEPTION 'Could not generate unique invite code'; END IF;
@@ -134,7 +134,7 @@ CREATE OR REPLACE FUNCTION join_household_by_invite(invite_code_input TEXT)
 RETURNS JSON LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE
   hh              households%ROWTYPE;
-  current_user_id TEXT;
+  current_user_id UUID;
 BEGIN
   current_user_id := (current_setting('neon_auth.user_id', true))::uuid;
 
